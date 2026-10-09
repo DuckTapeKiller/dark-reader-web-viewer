@@ -1,5 +1,6 @@
 import { Notice, Plugin } from 'obsidian';
 import {
+	reachableFilter,
 	splitFontFamilies,
 	toHex,
 	unfilterColor,
@@ -481,9 +482,11 @@ export default class DarkReaderWebViewerPlugin extends Plugin {
 			return { type: 'disable', font };
 		}
 
-		const filter = this.getFilterOptions();
-		const theme: DarkReaderThemeOptions = { ...filter, mode: scheme.mode };
 		const { colors } = scheme;
+		const filter = colors
+			? reachableFilter(this.getFilterOptions(), [colors.background, colors.text])
+			: this.getFilterOptions();
+		const theme: DarkReaderThemeOptions = { ...filter, mode: scheme.mode };
 		if (colors) {
 			const background = unfilterColor(colors.background, filter);
 			const text = unfilterColor(colors.text, filter);

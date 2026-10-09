@@ -87,6 +87,37 @@ export function unfilterColor(hex: string, filter: ColorFilter): string {
 	return toHex(color);
 }
 
+/**
+ * Below 100% contrast Dark Reader's filter cannot produce pure white (or, with
+ * sepia, some other colors) whatever it is given, so a theme's own colors can be
+ * out of reach. Returns the filter with brightness raised just enough to reach
+ * every target. The user's brightness still scales on top of that.
+ */
+export function reachableFilter(
+	filter: ColorFilter,
+	targets: readonly string[],
+): ColorFilter {
+	const contrast = filter.contrast / 100;
+	const offset = (1 - contrast) / 2;
+	let needed = 1;
+	for (const hex of targets) {
+		let color = parseHex(hex);
+		if (!color) {
+			continue;
+		}
+		if (filter.sepia !== 0) {
+			color = solve(sepiaMatrix(filter.sepia / 100), color) ?? color;
+		}
+		for (const channel of color) {
+			needed = Math.max(needed, (channel - offset) / contrast);
+		}
+	}
+	return {
+		...filter,
+		brightness: filter.brightness * Math.min(needed, 2),
+	};
+}
+
 /** Splits a CSS font-family list, keeping quoted names intact. */
 export function splitFontFamilies(value: string): string[] {
 	const families: string[] = [];
