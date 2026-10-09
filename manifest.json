@@ -1,9 +1,9 @@
 {
   "id": "dark-reader-web-viewer",
   "name": "Dark Reader for Web Viewer",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "minAppVersion": "1.8.3",
-  "description": "Applies Dark Reader to pages opened in Obsidian's native Web viewer.",
+  "description": "Applies Dark Reader to pages opened in the native Web viewer.",
   "author": "OEB",
   "isDesktopOnly": true
 }
