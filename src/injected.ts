@@ -1,230 +1,166 @@
-import {
-	disable,
-	enable,
-	setFetchMethod,
-} from 'darkreader';
-import { DARK_READER_ACTION_KEY, DARK_READER_CONTROLLER_KEY } from './protocol';
-import type { DarkReaderAction, ObsidianBaseColors } from './protocol';
+import { disable, enable, setFetchMethod } from 'darkreader';
+import { DARK_READER_CONTROLLER_KEY, NEEDS_FONT_FACES } from './protocol';
+import type {
+	DarkReaderAction,
+	DarkReaderThemeOptions,
+	PageFont,
+	PageFontFace,
+} from './protocol';
 
 type DarkReaderController = {
-	apply: (action: DarkReaderAction) => void;
+	// Set by the plugin after installing, to tell its own build apart.
+	build?: string;
+	apply: (action: DarkReaderAction) => unknown;
+	setFontFaces?: (key: string, faces: PageFontFace[]) => void;
 	destroy?: () => void;
 };
 
 type InjectedWindow = Window & {
-	[DARK_READER_ACTION_KEY]?: DarkReaderAction;
 	[DARK_READER_CONTROLLER_KEY]?: DarkReaderController;
 };
 
-type SavedInlineColors = {
-	backgroundValue: string;
-	backgroundPriority: string;
-	textValue: string;
-	textPriority: string;
-	applyBackgroundColor: boolean;
-};
+// Same exclusions Dark Reader uses for its own font option, so icon fonts keep
+// working, plus code-like elements that should stay monospaced.
+const FONT_EXCLUSIONS = [
+	'pre',
+	'pre *',
+	'code',
+	'code *',
+	'kbd',
+	'kbd *',
+	'samp',
+	'samp *',
+	'tt',
+	'svg',
+	'svg *',
+	'math',
+	'math *',
+	'[aria-hidden="true"]',
+	'[class*="fa-"]',
+	'.fa',
+	'.fab',
+	'.fad',
+	'.fal',
+	'.far',
+	'.fas',
+	'.fass',
+	'.fasr',
+	'.fat',
+	'.icofont',
+	'[style*="font-"]',
+	'[class*="icon"]',
+	'[class*="Icon"]',
+	'[class*="symbol"]',
+	'[class*="Symbol"]',
+	'.glyphicon',
+	'[class*="material-symbol"]',
+	'[class*="material-icon"]',
+	'mu',
+	'[class*="mu-"]',
+	'.typcn',
+	'[class*="vjs-"]',
+].join(', ');
 
-const EXCLUDED_BASE_COLOR_TAGS = new Set([
-	'CANVAS',
-	'EMBED',
-	'IFRAME',
-	'IMG',
-	'LINK',
-	'META',
-	'OBJECT',
-	'PICTURE',
-	'SCRIPT',
-	'SOURCE',
-	'STYLE',
-	'SVG',
-	'VIDEO',
-]);
 const page = window as InjectedWindow;
-const savedInlineColors = new Map<HTMLElement, SavedInlineColors>();
-let activeBaseColors: ObsidianBaseColors | undefined;
-let baseColorObserver: MutationObserver | undefined;
 
-function isSafeColor(value: string): boolean {
-	return value.length > 0 && value.length <= 100 && !/[;{}]/.test(value);
-}
+// Dark Reader only recolors a running page in place when it is given a fixes
+// object both times; without one, later color changes are silently ignored.
+const NO_FIXES = {
+	invert: [],
+	css: '',
+	ignoreInlineStyle: [],
+	ignoreImageAnalysis: [],
+	disableStyleSheetsProxy: false,
+	ignoreCSSUrl: [],
+};
+let enabledMode: DarkReaderThemeOptions['mode'] | undefined;
 
-function parseCssAlpha(value: string): number {
-	const normalized = value.trim().toLowerCase();
-	if (!normalized || normalized === 'transparent') {
-		return 0;
-	}
+// A constructed sheet is not subject to the page's style-src policy, and fonts
+// built from bytes fetch nothing, so font-src cannot block them either.
+const fontFamilySheet = new CSSStyleSheet();
+let fontFacesKey: string | undefined;
+let fontFaces: FontFace[] = [];
 
-	const rgbaMatch = normalized.match(
-		/^rgba\([^,]+,[^,]+,[^,]+,\s*([^)]+)\)$/,
-	);
-	const modernColorMatch = normalized.match(/\/\s*([^)]+)\)$/);
-	const alphaValue = rgbaMatch?.[1] ?? modernColorMatch?.[1];
-	if (!alphaValue) {
-		return 1;
-	}
-
-	const alpha = alphaValue.endsWith('%')
-		? Number.parseFloat(alphaValue) / 100
-		: Number.parseFloat(alphaValue);
-	return Number.isFinite(alpha) ? alpha : 0;
-}
-
-function hasOpaqueBackground(element: Element): boolean {
-	const styles = window.getComputedStyle(element);
-	return (
-		styles.backgroundImage === 'none' &&
-		parseCssAlpha(styles.backgroundColor) >= 1
-	);
-}
-
-function getBaseColorFixes(
-	colors: ObsidianBaseColors | undefined,
-): {
-	invert: string[];
-	css: string;
-	ignoreInlineStyle: string[];
-	ignoreImageAnalysis: string[];
-	disableStyleSheetsProxy: boolean;
-	ignoreCSSUrl: string[];
-} | undefined {
-	if (
-		!colors ||
-		!isSafeColor(colors.background) ||
-		!isSafeColor(colors.text)
-	) {
+function decodeDataUrl(source: string): ArrayBuffer | undefined {
+	const comma = source.indexOf(',');
+	if (comma < 0 || !source.slice(0, comma).endsWith(';base64')) {
 		return undefined;
 	}
-
-	return {
-		invert: [],
-		css: `html:root,
-html:root body {
-	background-color: ${colors.background} !important;
-	color: ${colors.text} !important;
-}`,
-		ignoreInlineStyle: [],
-		ignoreImageAnalysis: [],
-		disableStyleSheetsProxy: false,
-		ignoreCSSUrl: [],
-	};
+	try {
+		const binary = atob(source.slice(comma + 1));
+		const bytes = new Uint8Array(binary.length);
+		for (let index = 0; index < binary.length; index++) {
+			bytes[index] = binary.charCodeAt(index);
+		}
+		return bytes.buffer;
+	} catch {
+		return undefined;
+	}
 }
 
-function isBaseColorTarget(element: Element): element is HTMLElement {
-	return (
-		element.nodeType === 1 &&
-		'style' in element &&
-		!EXCLUDED_BASE_COLOR_TAGS.has(element.tagName)
+function setFontFaces(key: string | undefined, faces: PageFontFace[]): void {
+	fontFaces.forEach((face) => document.fonts.delete(face));
+	fontFaces = [];
+	for (const { family, source, descriptors } of faces) {
+		const bytes = decodeDataUrl(source);
+		if (!bytes) {
+			continue;
+		}
+		const face = new FontFace(family, bytes, descriptors);
+		face.loaded.catch(() => undefined);
+		document.fonts.add(face);
+		fontFaces.push(face);
+	}
+	fontFacesKey = key;
+}
+
+function setAdopted(sheet: CSSStyleSheet, adopted: boolean): void {
+	const sheets = document.adoptedStyleSheets.filter((item) => item !== sheet);
+	document.adoptedStyleSheets = adopted ? [...sheets, sheet] : sheets;
+}
+
+function applyFont(font: PageFont | undefined): boolean {
+	if (!font || /[;{}]/.test(font.family)) {
+		setAdopted(fontFamilySheet, false);
+		setFontFaces(undefined, []);
+		return true;
+	}
+
+	fontFamilySheet.replaceSync(
+		`html, body, body *:not(${FONT_EXCLUSIONS}) { font-family: ${font.family} !important; }`,
 	);
+	setAdopted(fontFamilySheet, true);
+	return fontFacesKey === font.facesKey;
 }
 
-function applyBaseColorsToElement(
-	element: Element,
-	colors: ObsidianBaseColors,
-): void {
-	if (!isBaseColorTarget(element)) {
-		return;
-	}
-
-	if (!savedInlineColors.has(element)) {
-		savedInlineColors.set(element, {
-			backgroundValue: element.style.getPropertyValue('background-color'),
-			backgroundPriority: element.style.getPropertyPriority(
-				'background-color',
-			),
-			textValue: element.style.getPropertyValue('color'),
-			textPriority: element.style.getPropertyPriority('color'),
-			applyBackgroundColor: hasOpaqueBackground(element),
-		});
-	}
-
-	const saved = savedInlineColors.get(element);
-	if (saved?.applyBackgroundColor) {
-		element.style.setProperty('background-color', colors.background, 'important');
-	}
-	element.style.setProperty('color', colors.text, 'important');
+const previous = page[DARK_READER_CONTROLLER_KEY];
+if (previous) {
+	// A controller from another plugin build is still running in this page.
+	previous.apply({ type: 'disable' });
+	previous.destroy?.();
 }
-
-function applyBaseColorsToTree(
-	root: Element,
-	colors: ObsidianBaseColors,
-): void {
-	applyBaseColorsToElement(root, colors);
-	root.querySelectorAll('*').forEach((element) => {
-		applyBaseColorsToElement(element, colors);
-	});
-}
-
-function clearBaseColors(): void {
-	activeBaseColors = undefined;
-	baseColorObserver?.disconnect();
-	baseColorObserver = undefined;
-
-	savedInlineColors.forEach((saved, element) => {
-		element.style.setProperty(
-			'background-color',
-			saved.backgroundValue,
-			saved.backgroundPriority,
-		);
-		element.style.setProperty('color', saved.textValue, saved.textPriority);
-	});
-	savedInlineColors.clear();
-}
-
-function applyBaseColors(colors: ObsidianBaseColors | undefined): void {
-	if (
-		!colors ||
-		!isSafeColor(colors.background) ||
-		!isSafeColor(colors.text) ||
-		!document.documentElement
-	) {
-		clearBaseColors();
-		return;
-	}
-
-	activeBaseColors = colors;
-	if (!baseColorObserver) {
-		baseColorObserver = new MutationObserver((mutations) => {
-			if (!activeBaseColors) {
-				return;
-			}
-			mutations.forEach((mutation) => {
-				mutation.addedNodes.forEach((node) => {
-					if (node.nodeType === 1) {
-						const colors = activeBaseColors;
-						if (colors) {
-							applyBaseColorsToTree(node as Element, colors);
-						}
-					}
-				});
-			});
-		});
-		baseColorObserver.observe(document.documentElement, {
-			childList: true,
-			subtree: true,
-		});
-	}
-
-	applyBaseColorsToTree(document.documentElement, colors);
-}
-
-page[DARK_READER_CONTROLLER_KEY]?.destroy?.();
 setFetchMethod((url) => window.fetch(url));
 
 page[DARK_READER_CONTROLLER_KEY] = {
 	apply(action: DarkReaderAction) {
 		if (action.type === 'enable') {
-			enable(action.theme, getBaseColorFixes(action.baseColors));
+			// A mode switch is not a color-only change, and Dark Reader would
+			// keep the old colors. Start over from the original page instead.
+			if (enabledMode !== undefined && enabledMode !== action.theme.mode) {
+				disable();
+			}
+			enable(action.theme, NO_FIXES);
+			enabledMode = action.theme.mode;
 		} else {
 			disable();
+			enabledMode = undefined;
 		}
-		applyBaseColors(action.baseColors);
+		return applyFont(action.font) ? 'applied' : NEEDS_FONT_FACES;
 	},
-	destroy: clearBaseColors,
+	setFontFaces,
+	destroy() {
+		disable();
+		enabledMode = undefined;
+		applyFont(undefined);
+	},
 };
-
-const action = page[DARK_READER_ACTION_KEY];
-delete page[DARK_READER_ACTION_KEY];
-
-if (action) {
-	page[DARK_READER_CONTROLLER_KEY]?.apply(action);
-}

@@ -6,6 +6,7 @@ export interface DarkReaderSettings {
 	enabled: boolean;
 	followObsidianTheme: boolean;
 	matchObsidianColors: boolean;
+	matchObsidianFont: boolean;
 	brightness: number;
 	contrast: number;
 	sepia: number;
@@ -15,6 +16,7 @@ export const DEFAULT_SETTINGS: DarkReaderSettings = {
 	enabled: true,
 	followObsidianTheme: false,
 	matchObsidianColors: true,
+	matchObsidianFont: false,
 	brightness: 100,
 	contrast: 90,
 	sepia: 0,
@@ -34,11 +36,11 @@ export class DarkReaderSettingTab extends PluginSettingTab {
 		return [
 			{
 				type: 'group',
-				heading: 'Dark reader',
+				heading: 'Dark Reader',
 				items: [
 					{
-						name: 'Enable dark reader',
-						desc: 'Apply dark reader to pages opened in the native web viewer.',
+						name: 'Enable Dark Reader',
+						desc: 'Apply Dark Reader to pages opened in the web viewer.',
 						control: {
 							type: 'toggle',
 							key: 'enabled',
@@ -47,7 +49,7 @@ export class DarkReaderSettingTab extends PluginSettingTab {
 					},
 					{
 						name: 'Follow Obsidian theme',
-						desc: 'Only enable dark reader while Obsidian is using its dark theme.',
+						desc: 'Leave pages unchanged while Obsidian uses its light theme. Only applies when pages do not match Obsidian base colors.',
 						control: {
 							type: 'toggle',
 							key: 'followObsidianTheme',
@@ -56,7 +58,7 @@ export class DarkReaderSettingTab extends PluginSettingTab {
 					},
 					{
 						name: 'Match Obsidian base colors',
-						desc: "Apply Obsidian's primary background and normal text color to non-media page elements.",
+						desc: "Give pages Obsidian's background and text colors, light or dark to match Obsidian. Links and accents keep their own colors.",
 						control: {
 							type: 'toggle',
 							key: 'matchObsidianColors',
@@ -64,8 +66,17 @@ export class DarkReaderSettingTab extends PluginSettingTab {
 						},
 					},
 					{
+						name: 'Match Obsidian font',
+						desc: "Show page text in Obsidian's text font. Code and icon fonts are left alone.",
+						control: {
+							type: 'toggle',
+							key: 'matchObsidianFont',
+							defaultValue: DEFAULT_SETTINGS.matchObsidianFont,
+						},
+					},
+					{
 						name: 'Brightness',
-						desc: 'Dark reader brightness percentage.',
+						desc: 'Dark Reader brightness percentage.',
 						control: {
 							type: 'slider',
 							key: 'brightness',
@@ -78,7 +89,7 @@ export class DarkReaderSettingTab extends PluginSettingTab {
 					},
 					{
 						name: 'Contrast',
-						desc: 'Dark reader contrast percentage.',
+						desc: 'Dark Reader contrast percentage.',
 						control: {
 							type: 'slider',
 							key: 'contrast',
@@ -91,7 +102,7 @@ export class DarkReaderSettingTab extends PluginSettingTab {
 					},
 					{
 						name: 'Sepia',
-						desc: 'Dark reader sepia percentage.',
+						desc: 'Dark Reader sepia percentage.',
 						control: {
 							type: 'slider',
 							key: 'sepia',
@@ -134,8 +145,8 @@ export class DarkReaderSettingTab extends PluginSettingTab {
 		containerEl.empty();
 
 		new Setting(containerEl)
-			.setName('Enable dark reader')
-			.setDesc('Apply dark reader to pages opened in the native web viewer.')
+			.setName('Enable Dark Reader')
+			.setDesc('Apply Dark Reader to pages opened in the web viewer.')
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.plugin.settings.enabled)
@@ -147,7 +158,7 @@ export class DarkReaderSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName('Follow Obsidian theme')
 			.setDesc(
-				'Only enable dark reader while Obsidian is using its dark theme.',
+				'Leave pages unchanged while Obsidian uses its light theme. Only applies when pages do not match Obsidian base colors.',
 			)
 			.addToggle((toggle) =>
 				toggle
@@ -162,7 +173,7 @@ export class DarkReaderSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName('Match Obsidian base colors')
 			.setDesc(
-				"Apply Obsidian's primary background and normal text color to non-media page elements.",
+				"Give pages Obsidian's background and text colors, light or dark to match Obsidian. Links and accents keep their own colors.",
 			)
 			.addToggle((toggle) =>
 				toggle
@@ -175,8 +186,23 @@ export class DarkReaderSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName('Match Obsidian font')
+			.setDesc(
+				"Show page text in Obsidian's text font. Code and icon fonts are left alone.",
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.matchObsidianFont)
+					.onChange(async (value) => {
+						await this.plugin.updateSettings({
+							matchObsidianFont: value,
+						});
+					}),
+			);
+
+		new Setting(containerEl)
 			.setName('Brightness')
-			.setDesc('Dark reader brightness percentage.')
+			.setDesc('Dark Reader brightness percentage.')
 			.addSlider((slider) =>
 				slider
 					.setLimits(50, 150, 1)
@@ -188,7 +214,7 @@ export class DarkReaderSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Contrast')
-			.setDesc('Dark reader contrast percentage.')
+			.setDesc('Dark Reader contrast percentage.')
 			.addSlider((slider) =>
 				slider
 					.setLimits(50, 150, 1)
@@ -200,7 +226,7 @@ export class DarkReaderSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Sepia')
-			.setDesc('Dark reader sepia percentage.')
+			.setDesc('Dark Reader sepia percentage.')
 			.addSlider((slider) =>
 				slider
 					.setLimits(0, 50, 1)

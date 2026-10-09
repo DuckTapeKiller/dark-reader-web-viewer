@@ -2,7 +2,7 @@
 
 ## Dark Reader
 
-This plugin bundles the public API from [Dark Reader](https://github.com/darkreader/darkreader), version 4.9.133.
+This plugin bundles the public API from [Dark Reader](https://github.com/darkreader/darkreader), version 4.9.133. `src/colors.ts` also reproduces Dark Reader's color filter matrices in order to invert them.
 
 Dark Reader is distributed under the MIT License:
 
