@@ -1,4 +1,5 @@
 import { Notice, Plugin } from 'obsidian';
+import { PageColorScheme } from './color-scheme';
 import {
 	reachableFilter,
 	splitFontFamilies,
@@ -84,6 +85,7 @@ export default class DarkReaderWebViewerPlugin extends Plugin {
 	private lastThemeKey = '';
 	private colorContext?: CanvasRenderingContext2D | null;
 	private fontFacesCache?: { family: string; faces: PageFontFace[] };
+	private readonly colorScheme = new PageColorScheme();
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -170,6 +172,10 @@ export default class DarkReaderWebViewerPlugin extends Plugin {
 						() => undefined,
 					);
 					void this.removeFallback(binding);
+					void this.colorScheme.preferLight(
+						binding.webview.getWebContentsId(),
+						false,
+					);
 				}
 			}
 		});
@@ -381,6 +387,10 @@ export default class DarkReaderWebViewerPlugin extends Plugin {
 		reinstall: boolean,
 	): Promise<void> {
 		const action = this.getAction();
+		await this.colorScheme.preferLight(
+			webview.getWebContentsId(),
+			action.type === 'enable',
+		);
 
 		// The page itself reports whether this document already has the
 		// controller. Load events cannot tell, because in-page navigation
